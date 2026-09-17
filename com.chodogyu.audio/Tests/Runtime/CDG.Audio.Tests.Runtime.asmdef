@@ -1,0 +1,22 @@
+﻿{
+  "name": "CDG.Audio.Tests.Runtime",
+  "rootNamespace": "CDG.Audio.Tests.Runtime",
+  "references": [
+    "CDG.Audio",
+    "CDG.Core"
+  ],
+  "includePlatforms": [],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": false,
+  "defineConstraints": [
+    "UNITY_INCLUDE_TESTS"
+  ],
+  "versionDefines": [],
+  "noEngineReferences": false,
+  "optionalUnityReferences": [
+    "TestAssemblies"
+  ]
+}

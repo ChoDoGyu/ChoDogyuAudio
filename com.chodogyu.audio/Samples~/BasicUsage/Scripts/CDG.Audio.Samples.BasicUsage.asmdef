@@ -1,0 +1,17 @@
+﻿{
+  "name": "CDG.Audio.Samples.BasicUsage",
+  "rootNamespace": "CDG.Audio.Samples.BasicUsage",
+  "references": [
+    "CDG.Audio",
+    "CDG.Core"
+  ],
+  "includePlatforms": [],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": true,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": false
+}

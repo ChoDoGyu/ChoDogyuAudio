@@ -1,0 +1,25 @@
+﻿{
+  "name": "CDG.Audio.Tests.Editor",
+  "rootNamespace": "CDG.Audio.Tests.Editor",
+  "references": [
+    "CDG.Audio",
+    "CDG.Audio.Editor",
+    "CDG.Core"
+  ],
+  "includePlatforms": [
+    "Editor"
+  ],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": false,
+  "defineConstraints": [
+    "UNITY_INCLUDE_TESTS"
+  ],
+  "versionDefines": [],
+  "noEngineReferences": false,
+  "optionalUnityReferences": [
+    "TestAssemblies"
+  ]
+}

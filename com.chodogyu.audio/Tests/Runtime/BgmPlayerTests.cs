@@ -102,6 +102,7 @@ namespace CDG.Audio.Tests.Runtime
             Assert.That(sourceA.clip, Is.SameAs(clip));
             Assert.That(sourceA.loop, Is.True);
             Assert.That(player.IsPaused, Is.False);
+            Assert.That(player.IsFading, Is.False);
         }
 
         [Test]
@@ -184,14 +185,151 @@ namespace CDG.Audio.Tests.Runtime
         }
 
         [Test]
-        public void Pause_WithCurrentClip_SetsPausedState()
+        public void Play_WithFade_StartsAtZeroGain()
         {
-            AudioClip clip = CreateClip("bgm.main");
+            AudioClip clip = CreateClip("bgm.fade");
+
+            Result result = player.Play(clip, 1f, true, 2f);
+
+            Assert.That(result.IsSuccess, Is.True);
+            Assert.That(player.IsFading, Is.True);
+            Assert.That(player.FadeGain, Is.Zero);
+            Assert.That(sourceA.volume, Is.Zero);
+        }
+
+        [Test]
+        public void Play_WithFade_TickIncreasesGain()
+        {
+            AudioClip clip = CreateClip("bgm.fade");
+
+            player.Play(clip, 1f, true, 2f);
+            player.Tick(1f);
+
+            Assert.That(player.IsFading, Is.True);
+            Assert.That(player.FadeGain, Is.EqualTo(0.5f).Within(0.0001f));
+            Assert.That(sourceA.volume, Is.EqualTo(0.5f).Within(0.0001f));
+        }
+
+        [Test]
+        public void Play_WithFade_CompletesAtTargetGain()
+        {
+            AudioClip clip = CreateClip("bgm.fade");
+
+            player.Play(clip, 1f, true, 2f);
+            player.Tick(2f);
+
+            Assert.That(player.IsFading, Is.False);
+            Assert.That(player.FadeGain, Is.EqualTo(1f));
+            Assert.That(sourceA.volume, Is.EqualTo(1f));
+            Assert.That(player.CurrentClip, Is.SameAs(clip));
+        }
+
+        [TestCase(0f)]
+        [TestCase(-1f)]
+        public void Play_WithNonPositiveFadeDuration_PlaysImmediately(float duration)
+        {
+            AudioClip clip = CreateClip("bgm.fade");
+
+            player.Play(clip, 1f, true, duration);
+
+            Assert.That(player.IsFading, Is.False);
+            Assert.That(player.FadeGain, Is.EqualTo(1f));
+            Assert.That(sourceA.volume, Is.EqualTo(1f));
+        }
+
+        [Test]
+        public void Play_WithNaNFadeDuration_PlaysImmediately()
+        {
+            AudioClip clip = CreateClip("bgm.fade");
+
+            player.Play(clip, 1f, true, float.NaN);
+
+            Assert.That(player.IsFading, Is.False);
+            Assert.That(sourceA.volume, Is.EqualTo(1f));
+        }
+
+        [Test]
+        public void Play_WithInfiniteFadeDuration_PlaysImmediately()
+        {
+            AudioClip clip = CreateClip("bgm.fade");
+
+            player.Play(clip, 1f, true, float.PositiveInfinity);
+
+            Assert.That(player.IsFading, Is.False);
+            Assert.That(sourceA.volume, Is.EqualTo(1f));
+        }
+
+        [Test]
+        public void Play_SameClipDuringFadeIn_PreservesCurrentFade()
+        {
+            AudioClip clip = CreateClip("bgm.fade");
+
+            player.Play(clip, 1f, true, 4f);
+            player.Tick(1f);
+
+            float gainBeforeRequest = player.FadeGain;
 
             Result result = player.Play(clip);
 
             Assert.That(result.IsSuccess, Is.True);
+            Assert.That(player.IsFading, Is.True);
+            Assert.That(player.FadeGain, Is.EqualTo(gainBeforeRequest));
+        }
 
+        [Test]
+        public void Play_SameClipDuringFadeOut_CancelsStopImmediately()
+        {
+            AudioClip clip = CreateClip("bgm.main");
+
+            player.Play(clip);
+            player.Stop(4f);
+            player.Tick(1f);
+
+            Assert.That(player.FadeGain, Is.EqualTo(0.75f).Within(0.0001f));
+
+            Result result = player.Play(clip);
+
+            Assert.That(result.IsSuccess, Is.True);
+            Assert.That(player.CurrentClip, Is.SameAs(clip));
+            Assert.That(player.IsFading, Is.False);
+            Assert.That(player.FadeGain, Is.EqualTo(1f));
+            Assert.That(sourceA.volume, Is.EqualTo(1f));
+        }
+
+        [Test]
+        public void Play_SameClipDuringFadeOut_WithFadeDuration_FadesBackInFromCurrentGain()
+        {
+            AudioClip clip = CreateClip("bgm.main");
+
+            player.Play(clip);
+            player.Stop(4f);
+            player.Tick(2f);
+
+            Assert.That(player.FadeGain, Is.EqualTo(0.5f).Within(0.0001f));
+
+            Result result = player.Play(clip, 1f, true, 2f);
+
+            Assert.That(result.IsSuccess, Is.True);
+            Assert.That(player.IsFading, Is.True);
+            Assert.That(player.FadeGain, Is.EqualTo(0.5f).Within(0.0001f));
+
+            player.Tick(1f);
+
+            Assert.That(player.FadeGain, Is.EqualTo(0.75f).Within(0.0001f));
+
+            player.Tick(1f);
+
+            Assert.That(player.IsFading, Is.False);
+            Assert.That(player.FadeGain, Is.EqualTo(1f));
+            Assert.That(player.CurrentClip, Is.SameAs(clip));
+        }
+
+        [Test]
+        public void Pause_WithCurrentClip_SetsPausedState()
+        {
+            AudioClip clip = CreateClip("bgm.main");
+
+            player.Play(clip);
             player.Pause();
 
             Assert.That(player.CurrentClip, Is.SameAs(clip));
@@ -236,19 +374,50 @@ namespace CDG.Audio.Tests.Runtime
         }
 
         [Test]
+        public void Pause_DuringFade_PreventsFadeProgress()
+        {
+            AudioClip clip = CreateClip("bgm.fade");
+
+            player.Play(clip, 1f, true, 2f);
+            player.Tick(0.5f);
+
+            float gainBeforePause = player.FadeGain;
+
+            player.Pause();
+            player.Tick(1f);
+
+            Assert.That(player.FadeGain, Is.EqualTo(gainBeforePause));
+            Assert.That(player.IsFading, Is.True);
+        }
+
+        [Test]
         public void Resume_WhenPaused_ClearsPausedState()
         {
             AudioClip clip = CreateClip("bgm.main");
 
             player.Play(clip);
             player.Pause();
-
-            Assert.That(player.IsPaused, Is.True);
-
             player.Resume();
 
             Assert.That(player.CurrentClip, Is.SameAs(clip));
             Assert.That(player.IsPaused, Is.False);
+        }
+
+        [Test]
+        public void Resume_AfterPausedFade_ContinuesFade()
+        {
+            AudioClip clip = CreateClip("bgm.fade");
+
+            player.Play(clip, 1f, true, 2f);
+            player.Tick(0.5f);
+            player.Pause();
+
+            player.Tick(1f);
+            player.Resume();
+            player.Tick(0.5f);
+
+            Assert.That(player.FadeGain, Is.EqualTo(0.5f).Within(0.0001f));
+            Assert.That(player.IsFading, Is.True);
         }
 
         [Test]
@@ -273,13 +442,12 @@ namespace CDG.Audio.Tests.Runtime
         }
 
         [Test]
-        public void RefreshVolume_AppliesLatestVolumeState()
+        public void RefreshVolume_AppliesLatestVolumeStateDuringFade()
         {
-            AudioClip clip = CreateClip("bgm.main");
+            AudioClip clip = CreateClip("bgm.fade");
 
-            player.Play(clip, 0.5f);
-
-            Assert.That(sourceA.volume, Is.EqualTo(0.5f));
+            player.Play(clip, 1f, true, 2f);
+            player.Tick(1f);
 
             volumeState.SetMasterVolume(0.5f);
             volumeState.SetBgmVolume(0.8f);
@@ -287,6 +455,7 @@ namespace CDG.Audio.Tests.Runtime
             player.RefreshVolume();
 
             Assert.That(sourceA.volume, Is.EqualTo(0.2f).Within(0.0001f));
+            Assert.That(player.FadeGain, Is.EqualTo(0.5f).Within(0.0001f));
         }
 
         [Test]
@@ -331,15 +500,181 @@ namespace CDG.Audio.Tests.Runtime
         }
 
         [Test]
-        public void Stop_ClearsCurrentPlaybackState()
+        public void Stop_WithFade_StartsFromCurrentGain()
         {
             AudioClip clip = CreateClip("bgm.main");
 
-            Result result = player.Play(clip);
+            player.Play(clip);
+            player.Stop(2f);
+
+            Assert.That(player.IsFading, Is.True);
+            Assert.That(player.FadeGain, Is.EqualTo(1f));
+            Assert.That(player.CurrentClip, Is.SameAs(clip));
+        }
+
+        [Test]
+        public void Stop_WithFade_DecreasesGain()
+        {
+            AudioClip clip = CreateClip("bgm.main");
+
+            player.Play(clip);
+            player.Stop(2f);
+            player.Tick(1f);
+
+            Assert.That(player.IsFading, Is.True);
+            Assert.That(player.FadeGain, Is.EqualTo(0.5f).Within(0.0001f));
+            Assert.That(sourceA.volume, Is.EqualTo(0.5f).Within(0.0001f));
+        }
+
+        [Test]
+        public void Stop_WithFade_CompletesAndClearsClip()
+        {
+            AudioClip clip = CreateClip("bgm.main");
+
+            player.Play(clip);
+            player.Stop(2f);
+            player.Tick(2f);
+
+            Assert.That(player.IsFading, Is.False);
+            Assert.That(player.CurrentClip, Is.Null);
+            Assert.That(sourceA.clip, Is.Null);
+            Assert.That(sourceB.clip, Is.Null);
+        }
+
+        [Test]
+        public void Stop_DuringFadeIn_FadesOutFromCurrentGain()
+        {
+            AudioClip clip = CreateClip("bgm.fade");
+
+            player.Play(clip, 1f, true, 4f);
+            player.Tick(1f);
+
+            Assert.That(player.FadeGain, Is.EqualTo(0.25f).Within(0.0001f));
+
+            player.Stop(2f);
+
+            Assert.That(player.FadeGain, Is.EqualTo(0.25f).Within(0.0001f));
+
+            player.Tick(1f);
+
+            Assert.That(player.FadeGain, Is.EqualTo(0.125f).Within(0.0001f));
+        }
+
+        [Test]
+        public void Stop_DuringFadeOut_RestartsFromCurrentGainWithLatestDuration()
+        {
+            AudioClip clip = CreateClip("bgm.main");
+
+            player.Play(clip);
+            player.Stop(4f);
+            player.Tick(1f);
+
+            Assert.That(player.FadeGain, Is.EqualTo(0.75f).Within(0.0001f));
+
+            player.Stop(2f);
+            player.Tick(1f);
+
+            Assert.That(player.FadeGain, Is.EqualTo(0.375f).Within(0.0001f));
+
+            player.Tick(1f);
+
+            Assert.That(player.CurrentClip, Is.Null);
+            Assert.That(player.IsFading, Is.False);
+        }
+
+        [Test]
+        public void Stop_ImmediatelyDuringFade_ClearsPlayback()
+        {
+            AudioClip clip = CreateClip("bgm.fade");
+
+            player.Play(clip, 1f, true, 4f);
+            player.Tick(1f);
+
+            Assert.That(player.IsFading, Is.True);
+
+            player.Stop();
+
+            Assert.That(player.CurrentClip, Is.Null);
+            Assert.That(player.IsFading, Is.False);
+            Assert.That(sourceA.clip, Is.Null);
+            Assert.That(sourceB.clip, Is.Null);
+        }
+
+        [Test]
+        public void Play_NewClipDuringFade_UsesLatestRequest()
+        {
+            AudioClip first = CreateClip("bgm.first");
+            AudioClip second = CreateClip("bgm.second");
+
+            player.Play(first, 1f, true, 5f);
+            player.Tick(1f);
+
+            Result result = player.Play(second);
 
             Assert.That(result.IsSuccess, Is.True);
-            Assert.That(player.CurrentClip, Is.SameAs(clip));
+            Assert.That(player.CurrentClip, Is.SameAs(second));
+            Assert.That(player.IsFading, Is.False);
+            Assert.That(player.FadeGain, Is.EqualTo(1f));
+            Assert.That(sourceA.volume, Is.EqualTo(1f));
+        }
 
+        [Test]
+        public void Play_NewClipDuringFadeOut_UsesLatestRequest()
+        {
+            AudioClip first = CreateClip("bgm.first");
+            AudioClip second = CreateClip("bgm.second");
+
+            player.Play(first);
+            player.Stop(4f);
+            player.Tick(2f);
+
+            Assert.That(player.FadeGain, Is.EqualTo(0.5f).Within(0.0001f));
+
+            Result result = player.Play(second);
+
+            Assert.That(result.IsSuccess, Is.True);
+            Assert.That(player.CurrentClip, Is.SameAs(second));
+            Assert.That(player.IsFading, Is.False);
+            Assert.That(player.FadeGain, Is.EqualTo(1f));
+            Assert.That(sourceA.volume, Is.EqualTo(1f));
+        }
+
+        [Test]
+        public void Tick_WithInvalidDeltaTime_DoesNotAdvanceFade()
+        {
+            AudioClip clip = CreateClip("bgm.fade");
+
+            player.Play(clip, 1f, true, 2f);
+
+            player.Tick(0f);
+            player.Tick(-1f);
+            player.Tick(float.NaN);
+            player.Tick(float.PositiveInfinity);
+
+            Assert.That(player.FadeGain, Is.Zero);
+            Assert.That(player.IsFading, Is.True);
+        }
+
+        [Test]
+        public void Tick_WithDeltaTimeGreaterThanRemainingDuration_CompletesFade()
+        {
+            AudioClip clip = CreateClip("bgm.fade");
+
+            player.Play(clip, 1f, true, 2f);
+
+            player.Tick(5f);
+
+            Assert.That(player.IsFading, Is.False);
+            Assert.That(player.FadeGain, Is.EqualTo(1f));
+            Assert.That(sourceA.volume, Is.EqualTo(1f));
+        }
+
+        [Test]
+        public void Stop_Immediately_ClearsCurrentPlaybackState()
+        {
+            AudioClip clip = CreateClip("bgm.main");
+
+            player.Play(clip);
             player.Stop();
 
             Assert.That(player.CurrentClip, Is.Null);
@@ -347,22 +682,25 @@ namespace CDG.Audio.Tests.Runtime
             Assert.That(sourceB.clip, Is.Null);
             Assert.That(player.IsPlaying, Is.False);
             Assert.That(player.IsPaused, Is.False);
+            Assert.That(player.IsFading, Is.False);
         }
 
         [Test]
-        public void Stop_WhilePaused_ClearsPausedState()
+        public void Stop_WhilePausedWithFade_ResumesForFadeOut()
         {
             AudioClip clip = CreateClip("bgm.main");
 
             player.Play(clip);
             player.Pause();
 
-            Assert.That(player.IsPaused, Is.True);
+            player.Stop(2f);
 
-            player.Stop();
-
-            Assert.That(player.CurrentClip, Is.Null);
             Assert.That(player.IsPaused, Is.False);
+            Assert.That(player.IsFading, Is.True);
+
+            player.Tick(1f);
+
+            Assert.That(player.FadeGain, Is.EqualTo(0.5f).Within(0.0001f));
         }
 
         [Test]

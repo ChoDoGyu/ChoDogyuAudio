@@ -5,11 +5,19 @@ using UnityEngine;
 namespace CDG.Audio
 {
     /// <summary>
-    /// BGM 재생에 사용되는 AudioSource를 관리하고 기본 재생 및 Fade 상태를 제어합니다.
-    /// 두 개의 AudioSource를 보유하며 두 번째 Source는 이후 Cross Fade에 사용됩니다.
+    /// 두 개의 AudioSource를 사용하여 BGM 재생, Fade In/Out과 Cross Fade를 관리합니다.
+    /// 재생 요청에 따라 Active Source와 Inactive Source의 역할을 교환하여 AudioSource를 재사용합니다.
     /// </summary>
     internal sealed class BgmPlayer
     {
+        private enum TransitionMode
+        {
+            None = 0,
+            FadeIn = 1,
+            FadeOut = 2,
+            CrossFade = 3
+        }
+
         private readonly AudioSource sourceA;
         private readonly AudioSource sourceB;
         private readonly AudioVolumeState volumeState;
@@ -17,25 +25,34 @@ namespace CDG.Audio
         private AudioSource activeSource;
         private AudioSource inactiveSource;
 
-        private float currentVolumeScale = 1f;
+        private float activeVolumeScale = 1f;
+        private float inactiveVolumeScale = 1f;
+
+        private float activeGain = 1f;
+        private float inactiveGain;
+
         private bool isPaused;
 
-        private bool isFading;
-        private bool stopAfterFade;
-        private float fadeElapsed;
-        private float fadeDuration;
-        private float fadeStartGain;
-        private float fadeTargetGain = 1f;
-        private float fadeGain = 1f;
+        private TransitionMode transitionMode;
+        private bool stopAfterTransition;
+
+        private float transitionElapsed;
+        private float transitionDuration;
+
+        private float activeStartGain;
+        private float activeTargetGain = 1f;
+
+        private float inactiveStartGain;
+        private float inactiveTargetGain;
 
         /// <summary>
-        /// 현재 BGM으로 지정된 AudioClip을 반환합니다.
-        /// 재생 중인 BGM이 없으면 null을 반환합니다.
+        /// 현재 BGM으로 취급되는 AudioClip을 반환합니다.
+        /// Cross Fade 중에는 새로 요청된 BGM을 반환합니다.
         /// </summary>
         public AudioClip CurrentClip => activeSource.clip;
 
         /// <summary>
-        /// 현재 활성 AudioSource가 실제로 BGM을 재생 중인지 여부를 반환합니다.
+        /// 현재 Active Source가 실제 재생 중인지 여부를 반환합니다.
         /// Pause 상태에서는 false를 반환합니다.
         /// </summary>
         public bool IsPlaying => CurrentClip != null && !isPaused && activeSource.isPlaying;
@@ -46,18 +63,23 @@ namespace CDG.Audio
         public bool IsPaused => CurrentClip != null && isPaused;
 
         /// <summary>
-        /// 현재 BGM이 Fade 처리 중인지 여부를 반환합니다.
+        /// Fade In, Fade Out 또는 Cross Fade가 진행 중인지 여부를 반환합니다.
         /// </summary>
-        public bool IsFading => isFading;
+        public bool IsFading => transitionMode != TransitionMode.None;
 
         /// <summary>
-        /// 현재 BGM에 적용되는 Fade Gain을 반환합니다.
+        /// 현재 Active BGM에 적용되는 Fade Gain을 반환합니다.
         /// </summary>
-        internal float FadeGain => fadeGain;
+        internal float FadeGain => activeGain;
 
         /// <summary>
-        /// BGM 재생에 사용되는 두 AudioSource를 지정합니다.
-        /// 두 Source는 서로 다른 인스턴스여야 합니다.
+        /// 현재 두 BGM 사이의 Cross Fade가 진행 중인지 여부를 반환합니다.
+        /// </summary>
+        internal bool IsCrossFading => transitionMode == TransitionMode.CrossFade;
+
+        /// <summary>
+        /// BGM 재생에 사용할 두 AudioSource와 Volume State를 지정합니다.
+        /// 두 AudioSource는 서로 다른 인스턴스여야 합니다.
         /// </summary>
         /// <exception cref="ArgumentNullException">
         /// AudioSource 또는 Volume State가 null인 경우 발생합니다.
@@ -85,26 +107,23 @@ namespace CDG.Audio
 
         /// <summary>
         /// 지정된 AudioClip을 BGM으로 재생합니다.
-        /// 현재 BGM과 동일한 Clip이면 일반적으로 재시작하지 않으며,
-        /// Fade Out으로 정지 예약된 상태라면 최신 Play 요청을 우선하여 정지 예약을 취소합니다.
+        /// 기존 BGM이 있고 Fade Duration이 양수라면 두 AudioSource를 이용해 Cross Fade합니다.
         /// </summary>
         /// <param name="clip">재생할 BGM AudioClip입니다.</param>
         /// <param name="volumeScale">해당 BGM에 추가로 적용할 볼륨 배율입니다.</param>
         /// <param name="loop">BGM 반복 재생 여부입니다.</param>
-        /// <param name="fadeDuration">0보다 크면 해당 시간 동안 Fade In합니다.</param>
+        /// <param name="fadeDuration">0보다 크면 Fade In 또는 Cross Fade에 사용할 시간입니다.</param>
         /// <returns>재생 요청의 성공 또는 실패 결과입니다.</returns>
         public Result Play(AudioClip clip, float volumeScale = 1f, bool loop = true, float fadeDuration = 0f)
         {
             if (clip == null)
             {
-                return Result.Failure(new ResultError(
-                    AudioErrorCodes.InvalidClip,
-                    "재생할 BGM AudioClip이 지정되지 않았습니다."));
+                return Result.Failure(new ResultError(AudioErrorCodes.InvalidClip, "재생할 BGM AudioClip이 지정되지 않았습니다."));
             }
 
             if (ReferenceEquals(CurrentClip, clip))
             {
-                if (isFading && stopAfterFade)
+                if (transitionMode == TransitionMode.FadeOut)
                 {
                     CancelPendingStop(fadeDuration);
                 }
@@ -112,36 +131,27 @@ namespace CDG.Audio
                 return Result.Success();
             }
 
-            StopSources();
-            ResetFadeState();
+            float normalizedVolumeScale = NormalizeVolumeScale(volumeScale);
 
-            currentVolumeScale = NormalizeVolumeScale(volumeScale);
-            isPaused = false;
-
-            activeSource.clip = clip;
-            activeSource.loop = loop;
-
-            if (IsPositiveFinite(fadeDuration))
+            if (CurrentClip == null)
             {
-                fadeGain = 0f;
-                ApplyCurrentVolume();
-                activeSource.Play();
-
-                StartFade(0f, 1f, fadeDuration, false);
-
+                PlayFromSilence(clip, normalizedVolumeScale, loop, fadeDuration);
                 return Result.Success();
             }
 
-            fadeGain = 1f;
-            ApplyCurrentVolume();
-            activeSource.Play();
+            if (IsPositiveFinite(fadeDuration))
+            {
+                StartCrossFade(clip, normalizedVolumeScale, loop, fadeDuration);
+                return Result.Success();
+            }
 
+            PlayImmediately(clip, normalizedVolumeScale, loop);
             return Result.Success();
         }
 
         /// <summary>
         /// 현재 BGM을 Pause 상태로 전환합니다.
-        /// 재생 중인 BGM이 없거나 이미 Pause 상태라면 아무 작업도 수행하지 않습니다.
+        /// Cross Fade 중이라면 두 AudioSource를 함께 일시정지합니다.
         /// </summary>
         public void Pause()
         {
@@ -151,12 +161,18 @@ namespace CDG.Audio
             }
 
             activeSource.Pause();
+
+            if (inactiveSource.clip != null)
+            {
+                inactiveSource.Pause();
+            }
+
             isPaused = true;
         }
 
         /// <summary>
-        /// Pause 상태인 현재 BGM을 다시 재생합니다.
-        /// Pause 상태가 아니라면 아무 작업도 수행하지 않습니다.
+        /// Pause 상태인 BGM을 다시 재생합니다.
+        /// Cross Fade 중이라면 두 AudioSource를 함께 재개합니다.
         /// </summary>
         public void Resume()
         {
@@ -165,15 +181,20 @@ namespace CDG.Audio
                 return;
             }
 
-            ApplyCurrentVolume();
+            ApplyVolumes();
             activeSource.UnPause();
+
+            if (inactiveSource.clip != null)
+            {
+                inactiveSource.UnPause();
+            }
+
             isPaused = false;
         }
 
         /// <summary>
         /// 현재 BGM을 중지합니다.
-        /// Fade Duration이 0보다 크면 현재 Gain에서 0까지 Fade Out한 뒤 중지합니다.
-        /// 진행 중인 Fade가 있다면 최신 Stop 요청의 Duration으로 다시 계산합니다.
+        /// Fade Duration이 양수라면 현재 활성 Gain부터 0까지 Fade Out한 뒤 모든 BGM을 정지합니다.
         /// </summary>
         public void Stop(float fadeDuration = 0f)
         {
@@ -192,12 +213,16 @@ namespace CDG.Audio
             isPaused = false;
             activeSource.UnPause();
 
-            StartFade(fadeGain, 0f, fadeDuration, true);
+            if (inactiveSource.clip != null)
+            {
+                inactiveSource.UnPause();
+            }
+
+            StartTransition(TransitionMode.FadeOut, activeGain, 0f, inactiveGain, 0f, fadeDuration, true);
         }
 
         /// <summary>
-        /// 현재 Volume State를 재생 중인 BGM AudioSource에 다시 적용합니다.
-        /// BGM이 없는 경우에도 안전하게 호출할 수 있습니다.
+        /// 현재 Volume State를 재생 중인 모든 BGM AudioSource에 다시 적용합니다.
         /// </summary>
         public void RefreshVolume()
         {
@@ -206,16 +231,16 @@ namespace CDG.Audio
                 return;
             }
 
-            ApplyCurrentVolume();
+            ApplyVolumes();
         }
 
         /// <summary>
-        /// 진행 중인 BGM Fade 상태를 지정된 시간만큼 갱신합니다.
-        /// 음수, 0, NaN 또는 Infinity 값은 진행 시간으로 사용하지 않습니다.
+        /// 진행 중인 Fade 또는 Cross Fade 상태를 지정된 시간만큼 갱신합니다.
+        /// 0 이하, NaN 또는 Infinity 값은 무시합니다.
         /// </summary>
         public void Tick(float deltaTime)
         {
-            if (!isFading || isPaused)
+            if (transitionMode == TransitionMode.None || isPaused)
             {
                 return;
             }
@@ -225,67 +250,184 @@ namespace CDG.Audio
                 return;
             }
 
-            fadeElapsed = Mathf.Min(fadeElapsed + deltaTime, fadeDuration);
+            transitionElapsed = Mathf.Min(transitionElapsed + deltaTime, transitionDuration);
 
-            float progress = fadeDuration <= 0f
-                ? 1f
-                : fadeElapsed / fadeDuration;
+            float progress = transitionDuration <= 0f ? 1f : transitionElapsed / transitionDuration;
 
-            fadeGain = Mathf.Lerp(fadeStartGain, fadeTargetGain, progress);
-            ApplyCurrentVolume();
+            activeGain = Mathf.Lerp(activeStartGain, activeTargetGain, progress);
+            inactiveGain = Mathf.Lerp(inactiveStartGain, inactiveTargetGain, progress);
 
-            if (fadeElapsed < fadeDuration)
+            ApplyVolumes();
+
+            if (transitionElapsed < transitionDuration)
             {
                 return;
             }
 
-            bool shouldStop = stopAfterFade;
+            TransitionMode completedMode = transitionMode;
+            bool shouldStop = stopAfterTransition;
 
-            isFading = false;
-            stopAfterFade = false;
-            fadeElapsed = 0f;
+            activeGain = activeTargetGain;
+            inactiveGain = inactiveTargetGain;
 
-            fadeGain = fadeTargetGain;
-            ApplyCurrentVolume();
+            ClearTransitionState();
+            ApplyVolumes();
 
             if (shouldStop)
             {
                 StopImmediately();
+                return;
             }
+
+            if (completedMode == TransitionMode.CrossFade)
+            {
+                StopAndClearInactiveSource();
+            }
+        }
+
+        private void PlayFromSilence(AudioClip clip, float volumeScale, bool loop, float fadeDuration)
+        {
+            StopSources();
+            ClearTransitionState();
+
+            isPaused = false;
+
+            activeVolumeScale = volumeScale;
+            inactiveVolumeScale = 1f;
+
+            activeSource.clip = clip;
+            activeSource.loop = loop;
+
+            inactiveGain = 0f;
+
+            if (IsPositiveFinite(fadeDuration))
+            {
+                activeGain = 0f;
+                ApplyVolumes();
+                activeSource.Play();
+
+                StartTransition(TransitionMode.FadeIn, 0f, 1f, 0f, 0f, fadeDuration, false);
+                return;
+            }
+
+            activeGain = 1f;
+            ApplyVolumes();
+            activeSource.Play();
+        }
+
+        private void PlayImmediately(AudioClip clip, float volumeScale, bool loop)
+        {
+            StopSources();
+            ClearTransitionState();
+
+            isPaused = false;
+
+            activeVolumeScale = volumeScale;
+            inactiveVolumeScale = 1f;
+
+            activeGain = 1f;
+            inactiveGain = 0f;
+
+            activeSource.clip = clip;
+            activeSource.loop = loop;
+
+            ApplyVolumes();
+            activeSource.Play();
+        }
+
+        private void StartCrossFade(AudioClip clip, float volumeScale, bool loop, float duration)
+        {
+            StopAndClearInactiveSource();
+
+            AudioSource outgoingSource = activeSource;
+            AudioSource incomingSource = inactiveSource;
+
+            float outgoingGain = activeGain;
+            float outgoingVolumeScale = activeVolumeScale;
+
+            outgoingSource.UnPause();
+
+            incomingSource.clip = clip;
+            incomingSource.loop = loop;
+
+            activeSource = incomingSource;
+            inactiveSource = outgoingSource;
+
+            activeVolumeScale = volumeScale;
+            inactiveVolumeScale = outgoingVolumeScale;
+
+            activeGain = 0f;
+            inactiveGain = outgoingGain;
+
+            isPaused = false;
+
+            ApplyVolumes();
+            activeSource.Play();
+
+            StartTransition(TransitionMode.CrossFade, 0f, 1f, inactiveGain, 0f, duration, false);
         }
 
         private void CancelPendingStop(float requestedFadeDuration)
         {
-            stopAfterFade = false;
+            stopAfterTransition = false;
             isPaused = false;
+
             activeSource.UnPause();
+            StopAndClearInactiveSource();
 
             if (IsPositiveFinite(requestedFadeDuration))
             {
-                StartFade(fadeGain, 1f, requestedFadeDuration, false);
+                StartTransition(TransitionMode.FadeIn, activeGain, 1f, 0f, 0f, requestedFadeDuration, false);
                 return;
             }
 
-            ResetFadeState();
-            ApplyCurrentVolume();
+            activeGain = 1f;
+            inactiveGain = 0f;
+
+            ClearTransitionState();
+            ApplyVolumes();
         }
 
-        private void StartFade(float startGain, float targetGain, float duration, bool shouldStopAfterFade)
+        private void StartTransition(TransitionMode mode, float newActiveStartGain, float newActiveTargetGain, float newInactiveStartGain, float newInactiveTargetGain, float duration, bool shouldStopAfterTransition)
         {
-            fadeStartGain = Mathf.Clamp01(startGain);
-            fadeTargetGain = Mathf.Clamp01(targetGain);
-            fadeDuration = duration;
-            fadeElapsed = 0f;
-            stopAfterFade = shouldStopAfterFade;
-            isFading = true;
+            transitionMode = mode;
+            transitionElapsed = 0f;
+            transitionDuration = duration;
 
-            fadeGain = fadeStartGain;
-            ApplyCurrentVolume();
+            activeStartGain = Mathf.Clamp01(newActiveStartGain);
+            activeTargetGain = Mathf.Clamp01(newActiveTargetGain);
+
+            inactiveStartGain = Mathf.Clamp01(newInactiveStartGain);
+            inactiveTargetGain = Mathf.Clamp01(newInactiveTargetGain);
+
+            stopAfterTransition = shouldStopAfterTransition;
+
+            activeGain = activeStartGain;
+            inactiveGain = inactiveStartGain;
+
+            ApplyVolumes();
         }
 
-        private void ApplyCurrentVolume()
+        private void ApplyVolumes()
         {
-            activeSource.volume = volumeState.BgmGain * currentVolumeScale * fadeGain;
+            if (activeSource.clip != null)
+            {
+                activeSource.volume = volumeState.BgmGain * activeVolumeScale * activeGain;
+            }
+
+            if (inactiveSource.clip != null)
+            {
+                inactiveSource.volume = volumeState.BgmGain * inactiveVolumeScale * inactiveGain;
+            }
+        }
+
+        private void StopAndClearInactiveSource()
+        {
+            inactiveSource.Stop();
+            inactiveSource.clip = null;
+
+            inactiveGain = 0f;
+            inactiveVolumeScale = 1f;
         }
 
         private void StopImmediately()
@@ -308,22 +450,30 @@ namespace CDG.Audio
             activeSource = sourceA;
             inactiveSource = sourceB;
 
-            currentVolumeScale = 1f;
+            activeVolumeScale = 1f;
+            inactiveVolumeScale = 1f;
+
+            activeGain = 1f;
+            inactiveGain = 0f;
+
             isPaused = false;
 
-            ResetFadeState();
+            ClearTransitionState();
         }
 
-        private void ResetFadeState()
+        private void ClearTransitionState()
         {
-            isFading = false;
-            stopAfterFade = false;
+            transitionMode = TransitionMode.None;
+            stopAfterTransition = false;
 
-            fadeElapsed = 0f;
-            fadeDuration = 0f;
-            fadeStartGain = 1f;
-            fadeTargetGain = 1f;
-            fadeGain = 1f;
+            transitionElapsed = 0f;
+            transitionDuration = 0f;
+
+            activeStartGain = activeGain;
+            activeTargetGain = activeGain;
+
+            inactiveStartGain = inactiveGain;
+            inactiveTargetGain = inactiveGain;
         }
 
         private static void ConfigureSource(AudioSource source)

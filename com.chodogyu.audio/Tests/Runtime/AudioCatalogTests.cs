@@ -116,10 +116,7 @@ namespace CDG.Audio.Tests.Runtime
         [Test]
         public void ReplaceEntries_NullClip_ReturnsInvalidCatalog()
         {
-            AudioEntry entry = new AudioEntry(
-                new AudioId("sfx.missing"),
-                AudioCategory.Sfx,
-                null);
+            AudioEntry entry = new AudioEntry(new AudioId("sfx.missing"), AudioCategory.Sfx, null);
 
             Result result = catalog.ReplaceEntries(new AudioEntry[]
             {
@@ -133,9 +130,7 @@ namespace CDG.Audio.Tests.Runtime
         [Test]
         public void ReplaceEntries_InvalidCategory_ReturnsInvalidCatalog()
         {
-            AudioEntry entry = CreateEntry(
-                "audio.invalid",
-                (AudioCategory)999);
+            AudioEntry entry = CreateEntry("audio.invalid", (AudioCategory)999);
 
             Result result = catalog.ReplaceEntries(new AudioEntry[]
             {
@@ -149,10 +144,7 @@ namespace CDG.Audio.Tests.Runtime
         [Test]
         public void ReplaceEntries_VolumeBelowZero_ReturnsInvalidCatalog()
         {
-            AudioEntry entry = CreateEntry(
-                "sfx.invalid",
-                AudioCategory.Sfx,
-                -0.1f);
+            AudioEntry entry = CreateEntry("sfx.invalid", AudioCategory.Sfx, -0.1f);
 
             Result result = catalog.ReplaceEntries(new AudioEntry[]
             {
@@ -166,10 +158,7 @@ namespace CDG.Audio.Tests.Runtime
         [Test]
         public void ReplaceEntries_VolumeAboveOne_ReturnsInvalidCatalog()
         {
-            AudioEntry entry = CreateEntry(
-                "sfx.invalid",
-                AudioCategory.Sfx,
-                1.1f);
+            AudioEntry entry = CreateEntry("sfx.invalid", AudioCategory.Sfx, 1.1f);
 
             Result result = catalog.ReplaceEntries(new AudioEntry[]
             {
@@ -183,10 +172,7 @@ namespace CDG.Audio.Tests.Runtime
         [Test]
         public void ReplaceEntries_NaNVolume_ReturnsInvalidCatalog()
         {
-            AudioEntry entry = CreateEntry(
-                "sfx.invalid",
-                AudioCategory.Sfx,
-                float.NaN);
+            AudioEntry entry = CreateEntry("sfx.invalid", AudioCategory.Sfx, float.NaN);
 
             Result result = catalog.ReplaceEntries(new AudioEntry[]
             {
@@ -200,10 +186,7 @@ namespace CDG.Audio.Tests.Runtime
         [Test]
         public void ReplaceEntries_InfiniteVolume_ReturnsInvalidCatalog()
         {
-            AudioEntry entry = CreateEntry(
-                "sfx.invalid",
-                AudioCategory.Sfx,
-                float.PositiveInfinity);
+            AudioEntry entry = CreateEntry("sfx.invalid", AudioCategory.Sfx, float.PositiveInfinity);
 
             Result result = catalog.ReplaceEntries(new AudioEntry[]
             {
@@ -470,20 +453,11 @@ namespace CDG.Audio.Tests.Runtime
 
         private AudioEntry CreateEntry(string id, AudioCategory category, float volumeScale = 1f)
         {
-            AudioClip clip = AudioClip.Create(
-                id,
-                4410,
-                1,
-                44100,
-                false);
+            AudioClip clip = AudioClip.Create(id, 4410, 1, 44100, false);
 
             createdClips.Add(clip);
 
-            return new AudioEntry(
-                new AudioId(id),
-                category,
-                clip,
-                volumeScale);
+            return new AudioEntry(new AudioId(id), category, clip, volumeScale);
         }
     }
 }

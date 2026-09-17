@@ -97,9 +97,7 @@ namespace CDG.Audio
         {
             if (id.IsEmpty)
             {
-                return Result<AudioEntry>.Failure(new ResultError(
-                    AudioErrorCodes.InvalidId,
-                    "Audio ID는 비어 있을 수 없습니다."));
+                return Result<AudioEntry>.Failure(new ResultError(AudioErrorCodes.InvalidId, "Audio ID는 비어 있을 수 없습니다."));
             }
 
             Result buildResult = EnsureLookup();
@@ -111,9 +109,7 @@ namespace CDG.Audio
 
             if (!entriesById.TryGetValue(id, out AudioEntry entry))
             {
-                return Result<AudioEntry>.Failure(new ResultError(
-                    AudioErrorCodes.NotFound,
-                    $"Catalog에 등록되지 않은 Audio ID입니다: '{id}'"));
+                return Result<AudioEntry>.Failure(new ResultError(AudioErrorCodes.NotFound, $"Catalog에 등록되지 않은 Audio ID입니다: '{id}'"));
             }
 
             return Result<AudioEntry>.Success(entry);
@@ -157,9 +153,7 @@ namespace CDG.Audio
         {
             if (entriesById != null)
             {
-                return lookupBuildError == null
-                    ? Result.Success()
-                    : Result.Failure(lookupBuildError);
+                return lookupBuildError == null ? Result.Success() : Result.Failure(lookupBuildError);
             }
 
             Result<Dictionary<AudioId, AudioEntry>> lookupResult = BuildLookup(entries);

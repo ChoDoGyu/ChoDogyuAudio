@@ -119,8 +119,25 @@ namespace CDG.Audio
                 return;
             }
 
-            bgmPlayer.Stop();
-            sfxPlayer.StopAll();
+            if (runtimeSourceRoot != null)
+            {
+                bgmPlayer.Stop();
+                sfxPlayer.StopAll();
+
+                if (Application.isPlaying)
+                {
+                    Destroy(runtimeSourceRoot);
+                }
+                else
+                {
+                    DestroyImmediate(runtimeSourceRoot);
+                }
+            }
+
+            runtimeSourceRoot = null;
+            bgmPlayer = null;
+            sfxPlayer = null;
+            initialized = false;
         }
 
         /// <summary>

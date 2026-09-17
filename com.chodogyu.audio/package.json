@@ -1,6 +1,6 @@
 {
   "name": "com.chodogyu.audio",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "displayName": "ChoDogyu Audio Framework",
   "description": "Unity 프로젝트에서 BGM과 SFX의 재생, 전환, 볼륨 및 Mute 상태를 일관되게 관리하기 위한 범용 Audio Framework입니다.",
   "unity": "6000.3",

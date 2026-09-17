@@ -1,0 +1,19 @@
+﻿{
+  "name": "CDG.Audio.Editor",
+  "rootNamespace": "CDG.Audio.Editor",
+  "references": [
+    "CDG.Audio",
+    "CDG.Core"
+  ],
+  "includePlatforms": [
+    "Editor"
+  ],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": true,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": false
+}
